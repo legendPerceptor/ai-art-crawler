@@ -7,141 +7,245 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 import httpx
 
 
-class AICreatorVaultExporter:
-    """导出数据到 aicreatorvault"""
+class AICreatorVaultImporter:
+    """导入数据到 aicreatorvault"""
 
     def __init__(
         self,
         base_url: str = "http://localhost:3001",
         api_prefix: str = "/api",
+        proxy: Optional[str] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}{api_prefix}"
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=60.0, proxy=proxy, follow_redirects=True)
 
     async def close(self):
         await self.client.aclose()
+
+    async def health_check(self) -> bool:
+        """检查 API 是否可用"""
+        try:
+            response = await self.client.get(f"{self.api_url}/prompts")
+            return response.status_code == 200
+        except:
+            return False
 
     async def create_prompt(
         self,
         content: str,
         score: int = 0,
     ) -> dict:
-        """创建提示词"""
+        """创建提示词
+        
+        Args:
+            content: 提示词内容
+            score: 评分 (0-5)
+        """
         response = await self.client.post(
             f"{self.api_url}/prompts",
             json={
                 "content": content,
-                "score": score,
+                "score": min(max(score, 0), 5),  # 限制在 0-5
             }
         )
         response.raise_for_status()
         return response.json()
 
+    async def download_image(self, url: str) -> bytes:
+        """下载图片"""
+        response = await self.client.get(url)
+        response.raise_for_status()
+        return response.content
+
     async def upload_image(
         self,
-        image_path: str,
+        image_data: bytes,
+        filename: str,
         prompt_id: Optional[int] = None,
         analyze: bool = True,
     ) -> dict:
-        """上传图片"""
-        with open(image_path, "rb") as f:
-            files = {"image": (Path(image_path).name, f, "image/jpeg")}
-            data = {}
-            
-            if prompt_id:
-                data["promptId"] = prompt_id
-            if analyze:
-                data["analyze"] = "true"
+        """上传图片到 aicreatorvault
+        
+        Args:
+            image_data: 图片二进制数据
+            filename: 文件名
+            prompt_id: 关联的提示词 ID
+            analyze: 是否自动分析图片
+        """
+        files = {"image": (filename, image_data, "image/jpeg")}
+        data = {}
+        
+        if prompt_id:
+            data["promptId"] = str(prompt_id)
+        
+        # 关闭自动分析（导入时批量分析更高效）
+        data["autoAnalyze"] = "false"
 
-            response = await self.client.post(
-                f"{self.api_url}/images",
-                files=files,
-                data=data,
+        response = await self.client.post(
+            f"{self.api_url}/images",
+            files=files,
+            data=data,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def import_artwork(
+        self,
+        artwork: dict,
+        download_images: bool = True,
+    ) -> dict:
+        """导入单个作品
+        
+        Args:
+            artwork: 爬取的作品数据
+            download_images: 是否下载并上传图片
+        """
+        result = {
+            "source_id": artwork.get("source_id"),
+            "prompt_created": False,
+            "image_uploaded": False,
+            "prompt_id": None,
+            "image_id": None,
+            "error": None,
+        }
+        
+        try:
+            # 1. 创建提示词
+            prompt_content = artwork.get("prompt", "")
+            if not prompt_content:
+                result["error"] = "No prompt content"
+                return result
+            
+            # 计算评分（基于点赞数）
+            likes = artwork.get("likes", 0)
+            score = min(likes // 10, 5)  # 每10个点赞得1分，最高5分
+            
+            prompt_data = await self.create_prompt(
+                content=prompt_content,
+                score=score,
             )
-            response.raise_for_status()
-            return response.json()
+            result["prompt_created"] = True
+            result["prompt_id"] = prompt_data.get("id")
+            
+            # 2. 下载并上传图片
+            if download_images and artwork.get("image_url"):
+                try:
+                    image_data = await self.download_image(artwork["image_url"])
+                    
+                    # 生成文件名
+                    ext = ".jpg"
+                    if "?" in artwork["image_url"]:
+                        path_part = artwork["image_url"].split("?")[0]
+                        ext = Path(path_part).suffix or ".jpg"
+                    
+                    filename = f"civitai_{artwork.get('source_id', 'unknown')}{ext}"
+                    
+                    image_data_result = await self.upload_image(
+                        image_data=image_data,
+                        filename=filename,
+                        prompt_id=result["prompt_id"],
+                        analyze=False,  # 批量分析更高效
+                    )
+                    result["image_uploaded"] = True
+                    result["image_id"] = image_data_result.get("id")
+                    
+                except Exception as e:
+                    result["error"] = f"Image upload failed: {str(e)}"
+        
+        except Exception as e:
+            result["error"] = str(e)
+        
+        return result
 
     async def import_from_json(
         self,
         json_path: str,
-        upload_images: bool = True,
-        analyze_images: bool = True,
+        download_images: bool = True,
+        limit: Optional[int] = None,
     ):
-        """从 JSON 文件导入数据"""
+        """从 JSON 文件导入数据
+        
+        Args:
+            json_path: JSON 文件路径
+            download_images: 是否下载图片
+            limit: 限制导入数量
+        """
+        print(f"读取文件: {json_path}")
+        
         with open(json_path, "r", encoding="utf-8") as f:
             artworks = json.load(f)
-
-        print(f"开始导入 {len(artworks)} 条数据...")
-
+        
+        if limit:
+            artworks = artworks[:limit]
+        
+        print(f"准备导入 {len(artworks)} 条数据...")
+        
+        # 检查 API 连接
+        if not await self.health_check():
+            print("❌ 无法连接到 aicreatorvault API")
+            return
+        
+        print("✅ API 连接正常")
+        
         imported = 0
-        skipped = 0
-
+        failed = 0
+        results = []
+        
         for i, artwork in enumerate(artworks):
-            try:
-                # 创建提示词
-                prompt_data = None
-                if artwork.get("prompt"):
-                    prompt_data = await self.create_prompt(
-                        content=artwork["prompt"],
-                        score=min(artwork.get("likes", 0) // 10, 5),  # 将点赞数转为评分
-                    )
-                    print(f"  [{i+1}/{len(artworks)}] 创建提示词: {artwork['prompt'][:50]}...")
-
-                # 上传图片
-                if upload_images and artwork.get("local_path"):
-                    image_data = await self.upload_image(
-                        image_path=artwork["local_path"],
-                        prompt_id=prompt_data["id"] if prompt_data else None,
-                        analyze=analyze_images,
-                    )
-                    print(f"  [{i+1}/{len(artworks)}] 上传图片: {artwork['local_path']}")
-                
+            print(f"\n[{i+1}/{len(artworks)}] 处理: {artwork.get('source_id', 'unknown')}")
+            
+            result = await self.import_artwork(
+                artwork=artwork,
+                download_images=download_images,
+            )
+            results.append(result)
+            
+            if result.get("prompt_created"):
                 imported += 1
-
-            except Exception as e:
-                print(f"  [{i+1}/{len(artworks)}] 导入失败: {e}")
-                skipped += 1
-
-        print(f"\n导入完成!")
-        print(f"  成功: {imported}")
-        print(f"  失败: {skipped}")
+                print(f"  ✅ 提示词: {artwork.get('prompt', '')[:50]}...")
+                if result.get("image_uploaded"):
+                    print(f"  ✅ 图片已上传")
+            else:
+                failed += 1
+                print(f"  ❌ 失败: {result.get('error')}")
+        
+        print(f"\n{'='*50}")
+        print(f"导入完成!")
+        print(f"  ✅ 成功: {imported}")
+        print(f"  ❌ 失败: {failed}")
+        
+        return results
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="导出数据到 aicreatorvault")
+    parser = argparse.ArgumentParser(description="导入数据到 aicreatorvault")
     parser.add_argument("json_file", help="爬取的 JSON 数据文件")
-    parser.add_argument(
-        "--url",
-        default="http://localhost:3001",
-        help="aicreatorvault API 地址"
-    )
-    parser.add_argument(
-        "--no-upload",
-        action="store_true",
-        help="不上传图片"
-    )
-    parser.add_argument(
-        "--no-analyze",
-        action="store_true",
-        help="不分析图片"
-    )
-
+    parser.add_argument("--url", default="http://localhost:3001", help="aicreatorvault API 地址")
+    parser.add_argument("--proxy", help="代理服务器")
+    parser.add_argument("--no-download", action="store_true", help="不上传图片")
+    parser.add_argument("--limit", type=int, help="限制导入数量")
+    
     args = parser.parse_args()
-
-    exporter = AICreatorVaultExporter(base_url=args.url)
+    
+    importer = AICreatorVaultImporter(
+        base_url=args.url,
+        proxy=args.proxy,
+    )
+    
     try:
-        await exporter.import_from_json(
+        await importer.import_from_json(
             json_path=args.json_file,
-            upload_images=not args.no_upload,
-            analyze_images=not args.no_analyze,
+            download_images=not args.no_download,
+            limit=args.limit,
         )
     finally:
-        await exporter.close()
+        await importer.close()
 
 
 if __name__ == "__main__":
