@@ -1,0 +1,20 @@
+services:
+  crawler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: ai-art-crawler
+    networks:
+      - aicreatorvault_aicreatorvault-net
+    volumes:
+      - ./data:/data
+    environment:
+      - OUTPUT_DIR=/data/crawled
+      - DATABASE_URL=postgresql://aicreator:Gauss_234@aicreatorvault-postgres-1:5432/aicreatorvault
+      - HTTP_PROXY=http://xray:1087
+      - HTTPS_PROXY=http://xray:1087
+    command: python scripts/run_crawler.py --site civitai --limit 20 --tag portrait --download --save-db
+
+networks:
+  aicreatorvault_aicreatorvault-net:
+    external: true

@@ -1,34 +1,67 @@
 """
 Civitai 爬虫 - 从 Civitai.com 爬取 AI 图片和提示词
-
-Civitai 有公开 API，比较容易爬取
-API 文档: https://civitai.com/api/v1
 """
 import asyncio
+import hashlib
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 
-from crawler.base import BaseCrawler, Artwork
+import httpx
+from pydantic import BaseModel, Field
 
 
-class CivitaiCrawler(BaseCrawler):
-    """Civitai 爬虫"""
+class Artwork(BaseModel):
+    """爬取的艺术作品数据模型"""
+    id: str = ""
+    source: str
+    source_id: str = ""
+    source_url: str = ""
+    prompt: str = ""
+    negative_prompt: str = ""
+    model: str = ""
+    style: str = ""
+    width: int = 0
+    height: int = 0
+    image_url: str = ""
+    local_path: str = ""
+    seed: Optional[int] = None
+    author: str = ""
+    likes: int = 0
+    tags: list[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    crawled_at: datetime = Field(default_factory=datetime.now)
+    raw_data: dict = Field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.id:
+            unique_str = f"{self.source}:{self.source_id or self.source_url}"
+            self.id = hashlib.md5(unique_str.encode()).hexdigest()[:16]
+
+
+class CivitaiCrawler:
+    """Civitai API 爬虫（无需浏览器）"""
 
     API_BASE = "https://civitai.com/api/v1"
 
-    def __init__(self, **kwargs):
-        super().__init__(
-            name="civitai",
-            base_url="https://civitai.com",
-            **kwargs
-        )
-        self.session = None
+    def __init__(
+        self,
+        output_dir: str = "data/crawled",
+        proxy: Optional[str] = None,
+        rate_limit: float = 2.0,
+    ):
+        self.output_dir = Path(output_dir)
+        self.proxy = proxy
+        self.rate_limit = rate_limit
+        self.http_client = None
+        self._last_request_time = 0.0
 
     async def setup(self):
         """初始化"""
-        await super().setup()
-        import httpx
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        (self.output_dir / "images").mkdir(exist_ok=True)
+        
         self.http_client = httpx.AsyncClient(
             timeout=30.0,
             proxy=self.proxy,
@@ -39,30 +72,27 @@ class CivitaiCrawler(BaseCrawler):
         """清理"""
         if self.http_client:
             await self.http_client.aclose()
-        await super().teardown()
+
+    async def rate_limit_wait(self):
+        """等待以遵守速率限制"""
+        import time
+        elapsed = time.time() - self._last_request_time
+        wait_time = (1.0 / self.rate_limit) - elapsed
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+        self._last_request_time = time.time()
 
     async def fetch_images(
         self,
         limit: int = 100,
         cursor: Optional[str] = None,
-        model_id: Optional[int] = None,
         tag: Optional[str] = None,
     ) -> dict:
-        """
-        获取图片列表
-        
-        Args:
-            limit: 数量限制 (1-200)
-            cursor: 分页游标
-            model_id: 模型 ID
-            tag: 标签过滤
-        """
+        """获取图片列表"""
         params = {"limit": min(limit, 200), "nsfw": "false"}
         
         if cursor:
             params["cursor"] = cursor
-        if model_id:
-            params["modelId"] = model_id
         if tag:
             params["tag"] = tag
 
@@ -73,6 +103,19 @@ class CivitaiCrawler(BaseCrawler):
         response.raise_for_status()
         
         return response.json()
+
+    async def download_image(self, url: str) -> str:
+        """下载图片"""
+        ext = Path(url.split("?")[0]).suffix or ".jpg"
+        filename = hashlib.md5(url.encode()).hexdigest() + ext
+        save_path = self.output_dir / "images" / filename
+        
+        await self.rate_limit_wait()
+        response = await self.http_client.get(url)
+        response.raise_for_status()
+        
+        save_path.write_bytes(response.content)
+        return str(save_path)
 
     def parse_image_data(self, data: dict) -> Artwork:
         """解析图片数据"""
@@ -96,7 +139,6 @@ class CivitaiCrawler(BaseCrawler):
             raw_data=data,
         )
         
-        # 解析创建时间
         if data.get("createdAt"):
             try:
                 artwork.created_at = datetime.fromisoformat(
@@ -112,19 +154,11 @@ class CivitaiCrawler(BaseCrawler):
         limit: int = 100,
         tag: Optional[str] = None,
         download_images: bool = False,
-        **kwargs
     ) -> list[Artwork]:
-        """
-        爬取图片
-        
-        Args:
-            limit: 爬取数量
-            tag: 按标签过滤 (如 "portrait", "landscape")
-            download_images: 是否下载图片
-        """
+        """爬取图片"""
         artworks = []
         cursor = None
-        batch_size = 100  # API 每次最多返回 100 条
+        batch_size = 100
 
         print(f"开始爬取 Civitai，目标数量: {limit}")
         
@@ -145,7 +179,6 @@ class CivitaiCrawler(BaseCrawler):
             for item in items:
                 artwork = self.parse_image_data(item)
                 
-                # 下载图片
                 if download_images and artwork.image_url:
                     try:
                         local_path = await self.download_image(artwork.image_url)
@@ -158,10 +191,8 @@ class CivitaiCrawler(BaseCrawler):
                 if len(artworks) >= limit:
                     break
             
-            # 获取下一页游标
             cursor = data.get("metadata", {}).get("nextCursor")
             if not cursor:
-                print("已到达最后一页")
                 break
             
             print(f"已爬取 {len(artworks)}/{limit}")
@@ -169,27 +200,42 @@ class CivitaiCrawler(BaseCrawler):
         print(f"爬取完成，共 {len(artworks)} 条数据")
         return artworks
 
+    def save_artworks(self, artworks: list[Artwork]) -> Path:
+        """保存数据到 JSON"""
+        import json
+        
+        filename = f"civitai_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        filepath = self.output_dir / filename
+        
+        data = []
+        for a in artworks:
+            item = a.model_dump()
+            if isinstance(item.get('crawled_at'), datetime):
+                item['crawled_at'] = item['crawled_at'].isoformat()
+            if isinstance(item.get('created_at'), datetime):
+                item['created_at'] = item['created_at'].isoformat()
+            data.append(item)
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        return filepath
 
-async def main():
-    """测试爬虫"""
-    crawler = CivitaiCrawler(
-        output_dir="data/civitai",
-        rate_limit=2.0,  # 每秒 2 个请求
-    )
-    
-    # 爬取 50 张人像图片
-    artworks = await crawler.run(
-        limit=50,
-        tag="portrait",
-        download_images=True
-    )
-    
-    print(f"\n爬取结果:")
-    for a in artworks[:5]:
-        print(f"  - {a.prompt[:50]}... (by {a.author})")
-    
-    print(f"\n数据已保存到: {crawler.output_dir}")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    async def run(
+        self,
+        limit: int = 100,
+        tag: Optional[str] = None,
+        download_images: bool = False,
+    ) -> list[Artwork]:
+        """运行爬虫"""
+        await self.setup()
+        try:
+            artworks = await self.crawl(
+                limit=limit,
+                tag=tag,
+                download_images=download_images
+            )
+            self.save_artworks(artworks)
+            return artworks
+        finally:
+            await self.teardown()

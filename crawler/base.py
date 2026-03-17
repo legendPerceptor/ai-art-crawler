@@ -132,10 +132,15 @@ class BaseCrawler(ABC):
         
         filepath = self.output_dir / filename
         
-        data = [a.model_dump() for a in artworks]
-        data[-1]["crawled_at"] = data[-1]["crawled_at"].isoformat()
-        if data[-1].get("created_at"):
-            data[-1]["created_at"] = data[-1]["created_at"].isoformat()
+        data = []
+        for a in artworks:
+            item = a.model_dump()
+            # 处理 datetime 序列化
+            if isinstance(item.get('crawled_at'), datetime):
+                item['crawled_at'] = item['crawled_at'].isoformat()
+            if isinstance(item.get('created_at'), datetime):
+                item['created_at'] = item['created_at'].isoformat()
+            data.append(item)
         
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
