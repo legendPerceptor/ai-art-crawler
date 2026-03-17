@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  crawler:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ../data:/data
+      - ..:/app
+    environment:
+      - OUTPUT_DIR=/data/crawled
+      - PROXY=${HTTP_PROXY:-}
+    command: python scripts/run_crawler.py --site civitai --limit 100 --download
+
+  # 定时爬取任务（可选）
+  scheduler:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ../data:/data
+    environment:
+      - OUTPUT_DIR=/data/crawled
+      - PROXY=${HTTP_PROXY:-}
+    command: >
+      sh -c "
+        while true; do
+          echo 'Starting crawl at '$(date)
+          python scripts/run_crawler.py --site civitai --limit 50 --download
+          echo 'Sleeping for 6 hours...'
+          sleep 21600
+        done
+      "
+    profiles:
+      - scheduler

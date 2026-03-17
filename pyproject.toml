@@ -1,0 +1,12 @@
+[project]
+name = "ai-art-crawler"
+version = "0.1.0"
+description = "Crawl AI art prompts and images from various websites"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
