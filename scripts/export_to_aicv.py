@@ -43,13 +43,26 @@ class AICreatorVaultImporter:
         self,
         content: str,
         score: int = 0,
+        check_duplicate: bool = True,
     ) -> dict:
         """创建提示词
         
         Args:
             content: 提示词内容
             score: 评分 (0-5)
+            check_duplicate: 是否检查重复
         """
+        # 检查是否已存在相同内容的提示词
+        if check_duplicate:
+            response = await self.client.get(f"{self.api_url}/prompts")
+            if response.status_code == 200:
+                existing = response.json()
+                # 查找内容相同的提示词
+                for p in existing:
+                    if p.get('content') == content:
+                        print(f"  ℹ️  提示词已存在 (ID: {p['id']})，跳过创建")
+                        return p
+        
         response = await self.client.post(
             f"{self.api_url}/prompts",
             json={
