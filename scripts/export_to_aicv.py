@@ -23,6 +23,9 @@ class AICreatorVaultImporter:
     ):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}{api_prefix}"
+        # 默认使用 aigc-xray 代理（在 aicreatorvault 网络中）
+        if proxy is None:
+            proxy = "http://aigc-xray:1087"
         self.client = httpx.AsyncClient(timeout=60.0, proxy=proxy, follow_redirects=True)
 
     async def close(self):
@@ -59,9 +62,13 @@ class AICreatorVaultImporter:
 
     async def download_image(self, url: str) -> bytes:
         """下载图片"""
-        response = await self.client.get(url)
-        response.raise_for_status()
-        return response.content
+        try:
+            response = await self.client.get(url, follow_redirects=True)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            print(f"  ⚠️ 图片下载失败: {str(e)[:100]}")
+            raise
 
     async def upload_image(
         self,
@@ -104,7 +111,7 @@ class AICreatorVaultImporter:
         
         Args:
             artwork: 爬取的作品数据
-            download_images: 是否下载并上传图片
+            download_images: 是否下载图片
         """
         result = {
             "source_id": artwork.get("source_id"),
@@ -133,30 +140,50 @@ class AICreatorVaultImporter:
             result["prompt_created"] = True
             result["prompt_id"] = prompt_data.get("id")
             
-            # 2. 下载并上传图片
-            if download_images and artwork.get("image_url"):
-                try:
-                    image_data = await self.download_image(artwork["image_url"])
-                    
-                    # 生成文件名
-                    ext = ".jpg"
-                    if "?" in artwork["image_url"]:
-                        path_part = artwork["image_url"].split("?")[0]
-                        ext = Path(path_part).suffix or ".jpg"
-                    
-                    filename = f"civitai_{artwork.get('source_id', 'unknown')}{ext}"
-                    
-                    image_data_result = await self.upload_image(
-                        image_data=image_data,
-                        filename=filename,
-                        prompt_id=result["prompt_id"],
-                        analyze=False,  # 批量分析更高效
-                    )
-                    result["image_uploaded"] = True
-                    result["image_id"] = image_data_result.get("id")
-                    
-                except Exception as e:
-                    result["error"] = f"Image upload failed: {str(e)}"
+            # 2. 上传图片（优先使用本地文件）
+            if download_images:
+                image_data = None
+                filename = None
+                
+                # 优先使用本地文件
+                local_path = artwork.get("local_path")
+                if local_path:
+                    try:
+                        import os
+                        if os.path.exists(local_path):
+                            with open(local_path, "rb") as f:
+                                image_data = f.read()
+                            filename = os.path.basename(local_path)
+                            print(f"  📁 使用本地图片: {filename}")
+                    except Exception as e:
+                        print(f"  ⚠️ 读取本地图片失败: {e}")
+                
+                # 如果本地文件不存在，从 URL 下载
+                if not image_data and artwork.get("image_url"):
+                    try:
+                        image_data = await self.download_image(artwork["image_url"])
+                        ext = ".jpg"
+                        if "?" in artwork["image_url"]:
+                            path_part = artwork["image_url"].split("?")[0]
+                            ext = Path(path_part).suffix or ".jpg"
+                        filename = f"civitai_{artwork.get('source_id', 'unknown')}{ext}"
+                        print(f"  🌐 从 URL 下载图片: {filename}")
+                    except Exception as e:
+                        result["error"] = f"Image download failed: {str(e)}"
+                
+                # 上传图片
+                if image_data and filename:
+                    try:
+                        image_data_result = await self.upload_image(
+                            image_data=image_data,
+                            filename=filename,
+                            prompt_id=result["prompt_id"],
+                            analyze=False,
+                        )
+                        result["image_uploaded"] = True
+                        result["image_id"] = image_data_result.get("id")
+                    except Exception as e:
+                        result["error"] = f"Image upload failed: {str(e)}"
         
         except Exception as e:
             result["error"] = str(e)
