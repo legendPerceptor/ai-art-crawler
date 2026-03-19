@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+      network: host
+      args:
+        - HTTP_PROXY=${BUILD_HTTP_PROXY:-}
+        - HTTPS_PROXY=${BUILD_HTTPS_PROXY:-}
     container_name: ai-art-crawler
     networks:
       - aicreatorvault_aicreatorvault-net
@@ -21,6 +25,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+      network: host
+      args:
+        - HTTP_PROXY=${BUILD_HTTP_PROXY:-}
+        - HTTPS_PROXY=${BUILD_HTTPS_PROXY:-}
     container_name: ai-art-exporter
     networks:
       - aicreatorvault_aicreatorvault-net
@@ -30,7 +38,9 @@ services:
       - HTTP_PROXY=http://aigc-xray:1087
       - HTTPS_PROXY=http://aigc-xray:1087
       - AICV_URL=${AICV_URL:-http://aicreatorvault-backend-1:3001}
-    command: python scripts/export_to_aicv.py /data/crawled/civitai_*.json --url $$AICV_URL
+    # command 在 docker compose run 时会被覆盖，这里是默认值
+    command: >
+      sh -c "python scripts/export_to_aicv.py /data/crawled/civitai_*.json --url $${AICV_URL}"
     profiles:
       - export
 

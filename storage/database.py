@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import create_engine, Column, String, Integer, Text, DateTime, JSON, Index
+from sqlalchemy import create_engine, Column, String, Integer, BigInteger, Text, DateTime, JSON, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -26,7 +26,7 @@ class ArtworkDB(Base):
     height = Column(Integer, default=0)
     image_url = Column(Text)
     local_path = Column(Text)
-    seed = Column(Integer, nullable=True)
+    seed = Column(BigInteger, nullable=True)
     author = Column(String(100))
     likes = Column(Integer, default=0)
     tags = Column(JSON, default=list)

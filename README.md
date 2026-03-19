@@ -12,43 +12,44 @@
 
 ## 🚀 快速开始
 
-### 方式一：使用 Docker Compose（推荐）
+### 方式一：本地运行（推荐开发）
 
-**前提条件**：
-- 需要 `aicreatorvault` 项目已启动（提供 `aicreatorvault-net` 网络和 `aigc-xray` 代理容器）
-
-#### 1. 构建镜像
+**安装依赖**：
 
 ```bash
-docker compose build
+# 使用 uv（推荐）
+uv pip install -e .
+
+# 或使用 pip
+pip install -e .
 ```
 
-#### 2. 爬取数据
+**运行爬虫**：
 
 ```bash
-# 爬取 50 张人像图片并下载
-docker compose --profile crawl run --rm crawler
+# 基本用法
+python scripts/run_crawler.py --site civitai --limit 50 --tag portrait --download
 
-# 自定义参数
-docker compose --profile crawl run --rm crawler \
-  python scripts/run_crawler.py --site civitai --limit 100 --tag anime --download
+# 使用代理
+HTTPS_PROXY=http://localhost:1087 python scripts/run_crawler.py --limit 100 --download
+
+# 获取本周最热图片
+python scripts/run_crawler.py --limit 50 --period week --sort most_reacted --download
+
+# 保存到数据库
+DATABASE_URL="postgresql://user:pass@localhost:5432/db" \
+  python scripts/run_crawler.py --limit 50 --save-db
 ```
 
-#### 3. 导入到 aicreatorvault
+**导出到 aicreatorvault**：
 
 ```bash
-# 导入所有爬取的数据
-docker compose --profile export run --rm exporter
+python scripts/export_to_aicv.py data/crawled/civitai_*.json --url http://localhost:3001
 ```
-
-**优点**：
-- ✅ 自动使用 `aigc-xray` 代理访问外网
-- ✅ 自动连接 `aicreatorvault` 网络
-- ✅ 共享数据卷 `./data`
 
 ---
 
-### 方式二：使用 docker run
+### 方式二：使用 Docker Compose（推荐部署）
 
 **构建镜像**：
 
@@ -88,12 +89,26 @@ docker run --rm \
 - `--tag portrait` - 按标签过滤（可选）
 - `--download` - 下载图片到本地
 - `--save-db` - 保存到数据库（需要配置 DATABASE_URL）
+- `--period day` - 时间范围：day, week, month, year, all
+- `--sort newest` - 排序方式：newest, most_reacted, most_collected
 
 **常用标签**：
 - `portrait` - 人像
 - `landscape` - 风景
 - `anime` - 动漫
 - `realistic` - 写实
+
+**获取不同数据**：
+```bash
+# 今日最新
+python scripts/run_crawler.py --limit 50 --period day --sort newest
+
+# 本周最热
+python scripts/run_crawler.py --limit 50 --period week --sort most_reacted
+
+# 历史最热
+python scripts/run_crawler.py --limit 50 --period all --sort most_collected
+```
 
 **导出参数**：
 - `--url` - aicreatorvault 后端地址

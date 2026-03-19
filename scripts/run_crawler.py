@@ -24,6 +24,8 @@ async def run_crawler(
     download: bool = False,
     save_db: bool = False,
     database_url: str = None,
+    period: str = "day",
+    sort: str = "newest",
 ):
     """运行爬虫"""
     crawler_cls = CRAWLERS.get(site)
@@ -42,19 +44,21 @@ async def run_crawler(
         limit=limit,
         tag=tag,
         download_images=download,
+        period=period,
+        sort=sort,
     )
 
     print(f"\n爬取完成!")
     print(f"  数量: {len(artworks)}")
     print(f"  输出目录: {output_dir}")
-    
+
     # 保存到数据库
     if save_db and database_url:
         from storage.database import Database
-        
+
         print("\n保存到数据库...")
         db = Database(database_url)
-        
+
         data_list = []
         for a in artworks:
             data = a.model_dump()
@@ -63,10 +67,10 @@ async def run_crawler(
             if isinstance(data.get('created_at'), datetime):
                 data['created_at'] = data['created_at']
             data_list.append(data)
-        
+
         saved = db.save_artworks_batch(data_list)
         print(f"  已保存: {saved} 条")
-    
+
     # 打印统计
     if artworks:
         with_prompt = len([a for a in artworks if a.prompt])
@@ -80,12 +84,14 @@ def main():
     parser = argparse.ArgumentParser(description="AI Art 爬虫")
     parser.add_argument("--site", "-s", choices=list(CRAWLERS.keys()), default="civitai", help="要爬取的网站")
     parser.add_argument("--limit", "-l", type=int, default=50, help="爬取数量 (默认 50)")
-    parser.add_argument("--output", "-o", default="data/crawled", help="输出目录")
+    parser.add_argument("--output", "-o", default=os.environ.get("OUTPUT_DIR", "data/crawled"), help="输出目录")
     parser.add_argument("--proxy", "-p", help="代理服务器")
     parser.add_argument("--tag", "-t", help="按标签过滤")
     parser.add_argument("--download", "-d", action="store_true", help="下载图片")
     parser.add_argument("--save-db", action="store_true", help="保存到数据库")
     parser.add_argument("--database-url", default=os.environ.get("DATABASE_URL"), help="数据库连接 URL")
+    parser.add_argument("--period", default="day", choices=["day", "week", "month", "year", "all"], help="时间范围")
+    parser.add_argument("--sort", default="newest", choices=["newest", "most_reacted", "most_collected"], help="排序方式")
 
     args = parser.parse_args()
 
@@ -98,6 +104,8 @@ def main():
         download=args.download,
         save_db=args.save_db,
         database_url=args.database_url,
+        period=args.period,
+        sort=args.sort,
     ))
 
 

@@ -87,21 +87,36 @@ class CivitaiCrawler:
         limit: int = 100,
         cursor: Optional[str] = None,
         tag: Optional[str] = None,
+        period: str = "day",
+        sort: str = "newest",
     ) -> dict:
-        """获取图片列表"""
-        params = {"limit": min(limit, 200), "nsfw": "false"}
-        
+        """获取图片列表
+
+        Args:
+            limit: 获取数量
+            cursor: 分页游标
+            tag: 标签过滤
+            period: 时间范围 (day, week, month, year, all)
+            sort: 排序方式 (newest, most_reacted, most_collected)
+        """
+        params = {
+            "limit": min(limit, 200),
+            "nsfw": "false",
+            "period": period,
+            "sort": sort,
+        }
+
         if cursor:
             params["cursor"] = cursor
         if tag:
             params["tag"] = tag
 
         url = f"{self.API_BASE}/images?{urlencode(params)}"
-        
+
         await self.rate_limit_wait()
         response = await self.http_client.get(url)
         response.raise_for_status()
-        
+
         return response.json()
 
     async def download_image(self, url: str) -> str:
@@ -154,6 +169,8 @@ class CivitaiCrawler:
         limit: int = 100,
         tag: Optional[str] = None,
         download_images: bool = False,
+        period: str = "day",
+        sort: str = "newest",
     ) -> list[Artwork]:
         """爬取图片"""
         artworks = []
@@ -161,42 +178,47 @@ class CivitaiCrawler:
         batch_size = 100
 
         print(f"开始爬取 Civitai，目标数量: {limit}")
-        
+        print(f"  标签: {tag or '全部'}")
+        print(f"  时间范围: {period}")
+        print(f"  排序: {sort}")
+
         while len(artworks) < limit:
             remaining = min(batch_size, limit - len(artworks))
-            
+
             data = await self.fetch_images(
                 limit=remaining,
                 cursor=cursor,
-                tag=tag
+                tag=tag,
+                period=period,
+                sort=sort,
             )
-            
+
             items = data.get("items", [])
             if not items:
                 print("没有更多数据")
                 break
-            
+
             for item in items:
                 artwork = self.parse_image_data(item)
-                
+
                 if download_images and artwork.image_url:
                     try:
                         local_path = await self.download_image(artwork.image_url)
                         artwork.local_path = local_path
                     except Exception as e:
                         print(f"下载图片失败: {e}")
-                
+
                 artworks.append(artwork)
-                
+
                 if len(artworks) >= limit:
                     break
-            
+
             cursor = data.get("metadata", {}).get("nextCursor")
             if not cursor:
                 break
-            
+
             print(f"已爬取 {len(artworks)}/{limit}")
-        
+
         print(f"爬取完成，共 {len(artworks)} 条数据")
         return artworks
 
@@ -226,6 +248,8 @@ class CivitaiCrawler:
         limit: int = 100,
         tag: Optional[str] = None,
         download_images: bool = False,
+        period: str = "day",
+        sort: str = "newest",
     ) -> list[Artwork]:
         """运行爬虫"""
         await self.setup()
@@ -233,7 +257,9 @@ class CivitaiCrawler:
             artworks = await self.crawl(
                 limit=limit,
                 tag=tag,
-                download_images=download_images
+                download_images=download_images,
+                period=period,
+                sort=sort,
             )
             self.save_artworks(artworks)
             return artworks
