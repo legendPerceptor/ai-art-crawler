@@ -12,51 +12,90 @@
 
 ## 🚀 快速开始
 
-### 1. 构建 Docker 镜像
+### 方式一：使用 Docker Compose（推荐）
+
+**前提条件**：
+- 需要 `aicreatorvault` 项目已启动（提供 `aicreatorvault-net` 网络和 `aigc-xray` 代理容器）
+
+#### 1. 构建镜像
 
 ```bash
-cd ai-art-crawler
+docker compose build
+```
+
+#### 2. 爬取数据
+
+```bash
+# 爬取 50 张人像图片并下载
+docker compose --profile crawl run --rm crawler
+
+# 自定义参数
+docker compose --profile crawl run --rm crawler \
+  python scripts/run_crawler.py --site civitai --limit 100 --tag anime --download
+```
+
+#### 3. 导入到 aicreatorvault
+
+```bash
+# 导入所有爬取的数据
+docker compose --profile export run --rm exporter
+```
+
+**优点**：
+- ✅ 自动使用 `aigc-xray` 代理访问外网
+- ✅ 自动连接 `aicreatorvault` 网络
+- ✅ 共享数据卷 `./data`
+
+---
+
+### 方式二：使用 docker run
+
+**构建镜像**：
+
+```bash
 docker build -t ai-art-crawler -f docker/Dockerfile .
 ```
 
-### 2. 爬取 Civitai 数据
+**爬取数据**：
 
 ```bash
-# 基本用法 - 爬取 50 张人像图片
+# 爬取 50 张人像图片（需要配置代理）
 docker run --rm \
-  --network proxy-net \
-  -e HTTP_PROXY=http://172.18.0.2:1087 \
-  -e HTTPS_PROXY=http://172.18.0.2:1087 \
+  --network aicreatorvault-net \
+  -e HTTP_PROXY=http://aigc-xray:1087 \
+  -e HTTPS_PROXY=http://aigc-xray:1087 \
   -v $(pwd)/data:/data \
   ai-art-crawler \
   python scripts/run_crawler.py --site civitai --limit 50 --tag portrait --download
 ```
 
-**参数说明：**
-- `--site civitai` - 爬取 Civitai 网站
-- `--limit 50` - 爬取数量
-- `--tag portrait` - 按标签过滤（可选）
-- `--download` - 下载图片到本地
-
-**常用标签：**
-- `portrait` - 人像
-- `landscape` - 风景
-- `anime` - 动漫
-- `realistic` - 写实
-
-### 3. 导入到 aicreatorvault
+**导入到 aicreatorvault**：
 
 ```bash
-# 确保 aicreatorvault 服务已启动
 docker run --rm \
-  --network aicreatorvault_aicreatorvault-net \
+  --network aicreatorvault-net \
   -v $(pwd)/data:/data \
   ai-art-crawler \
   python scripts/export_to_aicv.py /data/crawled/civitai_*.json \
   --url http://aicreatorvault-backend-1:3001
 ```
 
-**参数说明：**
+### 命令行参数说明
+
+**爬虫参数**：
+- `--site civitai` - 爬取 Civitai 网站
+- `--limit 50` - 爬取数量
+- `--tag portrait` - 按标签过滤（可选）
+- `--download` - 下载图片到本地
+- `--save-db` - 保存到数据库（需要配置 DATABASE_URL）
+
+**常用标签**：
+- `portrait` - 人像
+- `landscape` - 风景
+- `anime` - 动漫
+- `realistic` - 写实
+
+**导出参数**：
 - `--url` - aicreatorvault 后端地址
 - `--limit 10` - 限制导入数量（可选）
 
@@ -82,46 +121,27 @@ docker run --rm \
 
 ## 🛠️ 完整示例
 
-### 场景 1：爬取并导入 100 张人像图片
+### 场景 1：爬取并导入 100 张人像图片（Docker Compose）
 
 ```bash
 # Step 1: 爬取数据
-docker run --rm \
-  --network proxy-net \
-  -e HTTP_PROXY=http://172.18.0.2:1087 \
-  -e HTTPS_PROXY=http://172.18.0.2:1087 \
-  -v $(pwd)/data:/data \
-  ai-art-crawler \
+docker compose --profile crawl run --rm crawler \
   python scripts/run_crawler.py --site civitai --limit 100 --tag portrait --download
 
 # Step 2: 导入到 aicreatorvault
-docker run --rm \
-  --network aicreatorvault_aicreatorvault-net \
-  -v $(pwd)/data:/data \
-  ai-art-crawler \
-  python scripts/export_to_aicv.py /data/crawled/civitai_*.json \
-  --url http://aicreatorvault-backend-1:3001
+docker compose --profile export run --rm exporter
 ```
 
 ### 场景 2：测试模式 - 爬取 10 条数据
 
 ```bash
 # 仅爬取提示词，不下载图片
-docker run --rm \
-  --network proxy-net \
-  -e HTTP_PROXY=http://172.18.0.2:1087 \
-  -e HTTPS_PROXY=http://172.18.0.2:1087 \
-  -v $(pwd)/data:/data \
-  ai-art-crawler \
+docker compose --profile crawl run --rm crawler \
   python scripts/run_crawler.py --site civitai --limit 10 --tag portrait
 
 # 导入前 5 条测试
-docker run --rm \
-  --network aicreatorvault_aicreatorvault-net \
-  -v $(pwd)/data:/data \
-  ai-art-crawler \
-  python scripts/export_to_aicv.py /data/crawled/civitai_*.json \
-  --url http://aicreatorvault-backend-1:3001 --limit 5
+docker compose --profile export run --rm exporter \
+  python scripts/export_to_aicv.py /data/crawled/civitai_*.json --url $$AICV_URL --limit 5
 ```
 
 ## 📊 项目结构
@@ -143,6 +163,7 @@ ai-art-crawler/
 ├── data/                 # 数据目录
 │   ├── crawled/          # 爬取的 JSON
 │   └── images/           # 下载的图片
+├── docker-compose.yml    # Docker Compose 配置
 ├── requirements.txt
 └── README.md
 ```
@@ -151,21 +172,31 @@ ai-art-crawler/
 
 ### 使用代理
 
-爬虫容器需要通过代理访问外网：
+爬虫需要通过代理访问外网，Docker Compose 方式已自动配置 `aigc-xray` 代理：
 
 ```bash
-# 方式 1: 使用宿主机代理
--e HTTP_PROXY=http://172.18.0.2:1087
+# Docker Compose 方式（自动配置）
+HTTP_PROXY=http://aigc-xray:1087
+HTTPS_PROXY=http://aigc-xray:1087
 
-# 方式 2: 使用容器名（需要在同一网络）
--e HTTP_PROXY=http://xray:1087
+# docker run 方式需要手动指定
+docker run --rm \
+  --network aicreatorvault-net \
+  -e HTTP_PROXY=http://aigc-xray:1087 \
+  -e HTTPS_PROXY=http://aigc-xray:1087 \
+  ...
 ```
 
 ### 保存到数据库
 
 ```bash
-# 保存到 PostgreSQL（需要配置 DATABASE_URL）
+# Docker Compose 方式（已配置 DATABASE_URL）
+docker compose --profile crawl run --rm crawler \
+  python scripts/run_crawler.py --site civitai --limit 50 --save-db
+
+# docker run 方式需要手动指定
 docker run --rm \
+  --network aicreatorvault-net \
   -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
   ai-art-crawler \
   python scripts/run_crawler.py --site civitai --limit 50 --save-db

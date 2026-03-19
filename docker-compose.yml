@@ -10,10 +10,29 @@ services:
       - ./data:/data
     environment:
       - OUTPUT_DIR=/data/crawled
-      - DATABASE_URL=postgresql://aicreator:Gauss_234@aicreatorvault-postgres-1:5432/aicreatorvault
-      - HTTP_PROXY=http://xray:1087
-      - HTTPS_PROXY=http://xray:1087
+      - DATABASE_URL=postgresql://${DB_USER:-aicreator}:${DB_PASSWORD:?DB_PASSWORD is required}@aicreatorvault-postgres-1:5432/${DB_NAME:-aicreatorvault}
+      - HTTP_PROXY=http://aigc-xray:1087
+      - HTTPS_PROXY=http://aigc-xray:1087
     command: python scripts/run_crawler.py --site civitai --limit 20 --tag portrait --download --save-db
+    profiles:
+      - crawl
+
+  exporter:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: ai-art-exporter
+    networks:
+      - aicreatorvault_aicreatorvault-net
+    volumes:
+      - ./data:/data
+    environment:
+      - HTTP_PROXY=http://aigc-xray:1087
+      - HTTPS_PROXY=http://aigc-xray:1087
+      - AICV_URL=${AICV_URL:-http://aicreatorvault-backend-1:3001}
+    command: python scripts/export_to_aicv.py /data/crawled/civitai_*.json --url $$AICV_URL
+    profiles:
+      - export
 
 networks:
   aicreatorvault_aicreatorvault-net:

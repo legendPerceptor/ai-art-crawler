@@ -23,9 +23,7 @@ class AICreatorVaultImporter:
     ):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}{api_prefix}"
-        # 默认使用 aigc-xray 代理（在 aicreatorvault 网络中）
-        if proxy is None:
-            proxy = "http://aigc-xray:1087"
+        # 不设置默认代理，由调用者决定
         self.client = httpx.AsyncClient(timeout=60.0, proxy=proxy, follow_redirects=True)
 
     async def close(self):
@@ -88,7 +86,7 @@ class AICreatorVaultImporter:
         image_data: bytes,
         filename: str,
         prompt_id: Optional[int] = None,
-        analyze: bool = True,
+        analyze: bool = False,
     ) -> dict:
         """上传图片到 aicreatorvault
         
@@ -105,7 +103,7 @@ class AICreatorVaultImporter:
             data["promptId"] = str(prompt_id)
         
         # 关闭自动分析（导入时批量分析更高效）
-        data["autoAnalyze"] = "false"
+        data["autoAnalyze"] = analyze
 
         response = await self.client.post(
             f"{self.api_url}/images",
@@ -268,6 +266,7 @@ async def main():
     parser.add_argument("json_file", help="爬取的 JSON 数据文件")
     parser.add_argument("--url", default="http://localhost:3001", help="aicreatorvault API 地址")
     parser.add_argument("--proxy", help="代理服务器")
+    parser.add_argument("--no-proxy", action="store_true", help="不使用代理")
     parser.add_argument("--no-download", action="store_true", help="不上传图片")
     parser.add_argument("--limit", type=int, help="限制导入数量")
     
@@ -275,7 +274,7 @@ async def main():
     
     importer = AICreatorVaultImporter(
         base_url=args.url,
-        proxy=args.proxy,
+        proxy=None if args.no_proxy else args.proxy,
     )
     
     try:
