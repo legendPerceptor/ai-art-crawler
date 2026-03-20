@@ -43,7 +43,14 @@ DATABASE_URL="postgresql://user:pass@localhost:5432/db" \
 **导出到 aicreatorvault**：
 
 ```bash
+# 导入数据（默认启用知识图谱模式）
 uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json --url http://localhost:3001
+
+# 使用旧 API（禁用知识图谱）
+uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json --url http://localhost:3001 --no-kg
+
+# 限制导入数量（测试用）
+uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json --limit 10
 ```
 
 ---
@@ -111,6 +118,10 @@ python scripts/run_crawler.py --limit 50 --period AllTime --sort "Most Reactions
 **导出参数**：
 - `--url` - aicreatorvault 后端地址
 - `--limit 10` - 限制导入数量（可选）
+- `--no-kg` - 禁用知识图谱模式（使用旧 API）
+- `--no-download` - 不上传图片（仅导入提示词）
+- `--proxy` - 代理服务器（可选）
+- `--no-proxy` - 不使用代理（可选）
 
 ## 📁 数据格式
 
@@ -224,16 +235,37 @@ docker run --rm \
 
 ## 🔄 与 aicreatorvault 集成
 
+### 知识图谱模式（默认）
+
 导入流程：
 
-1. **创建提示词** - 通过 API 创建提示词记录
-2. **上传图片** - 优先使用本地已下载的图片
+1. **创建提示词资产** - 通过 `/api/assets` 创建 Prompt 资产
+2. **上传图片资产** - 通过 `/api/assets/upload` 创建 Image 资产
+3. **创建图谱关系** - 通过 `/api/relationships` 创建 Prompt → Image 的 `generated` 关系
+
+导入后可在 aicreatorvault 前端的"知识图谱"页面查看：
+- 资产节点（提示词、图片）
+- 关系边（生成关系）
+- 图谱可视化
+
+### 旧 API 模式
+
+使用 `--no-kg` 参数启用旧 API：
+
+1. **创建提示词** - 通过 `/api/prompts` 创建提示词
+2. **上传图片** - 通过 `/api/images` 上传图片并关联 promptId
 3. **关联数据** - 图片自动关联到提示词
 
-导入后可在 aicreatorvault 前端查看：
-- 提示词列表
-- 图片预览
-- 关联关系
+### API 对比
+
+| 功能 | 知识图谱模式 (默认) | 旧 API 模式 (--no-kg) |
+|------|-------------------|---------------------|
+| 提示词创建 | `/api/assets` (type: prompt) | `/api/prompts` |
+| 图片上传 | `/api/assets/upload` | `/api/images` |
+| 关系管理 | `/api/relationships` | 通过 promptId 自动关联 |
+| 图谱支持 | ✅ 完整知识图谱 | ❌ 仅基础关联 |
+| 评分范围 | 0-10 | 0-5 |
+| 前端展示 | "知识图谱"标签页 | "提示词"和"图片"标签页 |
 
 ## 📝 开发计划
 
@@ -241,6 +273,7 @@ docker run --rm \
 - [x] 图片下载
 - [x] aicreatorvault 导入
 - [x] 去重机制（支持多文件导入和跨文件去重）
+- [x] 知识图谱支持（Prompt -> Image 关系）
 - [ ] Lexica 爬虫
 - [ ] PromptHero 爬虫
 - [ ] Midjourney 爬虫
