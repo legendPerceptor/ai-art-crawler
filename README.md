@@ -17,24 +17,23 @@
 **安装依赖**：
 
 ```bash
-# 使用 uv（推荐）
+# 使用 uv 安装依赖（推荐）
+uv sync
+# Editable Install
 uv pip install -e .
-
-# 或使用 pip
-pip install -e .
 ```
 
 **运行爬虫**：
 
 ```bash
 # 基本用法
-python scripts/run_crawler.py --site civitai --limit 50 --tag portrait --download
+uv run python scripts/run_crawler.py --site civitai --limit 50 --download
 
 # 使用代理
 HTTPS_PROXY=http://localhost:1087 python scripts/run_crawler.py --limit 100 --download
 
 # 获取本周最热图片
-python scripts/run_crawler.py --limit 50 --period week --sort most_reacted --download
+uv run python scripts/run_crawler.py --limit 50 --period Week --sort "Most Reactions" --download
 
 # 保存到数据库
 DATABASE_URL="postgresql://user:pass@localhost:5432/db" \
@@ -44,7 +43,7 @@ DATABASE_URL="postgresql://user:pass@localhost:5432/db" \
 **导出到 aicreatorvault**：
 
 ```bash
-python scripts/export_to_aicv.py data/crawled/civitai_*.json --url http://localhost:3001
+uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json --url http://localhost:3001
 ```
 
 ---
@@ -58,6 +57,12 @@ docker build -t ai-art-crawler -f docker/Dockerfile .
 ```
 
 **爬取数据**：
+
+```bash
+# 使用docker compose
+docker compose --profile crawl run --rm crawler
+```
+
 
 ```bash
 # 爬取 50 张人像图片（需要配置代理）
@@ -86,28 +91,21 @@ docker run --rm \
 **爬虫参数**：
 - `--site civitai` - 爬取 Civitai 网站
 - `--limit 50` - 爬取数量
-- `--tag portrait` - 按标签过滤（可选）
 - `--download` - 下载图片到本地
 - `--save-db` - 保存到数据库（需要配置 DATABASE_URL）
-- `--period day` - 时间范围：day, week, month, year, all
-- `--sort newest` - 排序方式：newest, most_reacted, most_collected
-
-**常用标签**：
-- `portrait` - 人像
-- `landscape` - 风景
-- `anime` - 动漫
-- `realistic` - 写实
+- `--period Day` - 时间范围：AllTime, Year, Month, Week, Day
+- `--sort Newest` - 排序方式：Newest, Most Reactions, Most Comments
 
 **获取不同数据**：
 ```bash
 # 今日最新
-python scripts/run_crawler.py --limit 50 --period day --sort newest
+python scripts/run_crawler.py --limit 50 --period Day --sort Newest
 
 # 本周最热
-python scripts/run_crawler.py --limit 50 --period week --sort most_reacted
+python scripts/run_crawler.py --limit 50 --period Week --sort "Most Reactions"
 
 # 历史最热
-python scripts/run_crawler.py --limit 50 --period all --sort most_collected
+python scripts/run_crawler.py --limit 50 --period AllTime --sort "Most Reactions"
 ```
 
 **导出参数**：
@@ -242,11 +240,11 @@ docker run --rm \
 - [x] Civitai API 爬虫
 - [x] 图片下载
 - [x] aicreatorvault 导入
+- [x] 去重机制（支持多文件导入和跨文件去重）
 - [ ] Lexica 爬虫
 - [ ] PromptHero 爬虫
 - [ ] Midjourney 爬虫
 - [ ] 定时任务
-- [ ] 去重机制
 
 ## 📄 License
 

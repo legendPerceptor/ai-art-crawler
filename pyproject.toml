@@ -4,6 +4,26 @@ version = "0.1.0"
 description = "Crawl AI art prompts and images from various websites"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    # Core
+    "httpx>=0.26.0",
+    "aiofiles>=23.2.0",
+    # Database
+    "sqlalchemy>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+    # Utils
+    "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["crawler*", "config*", "storage*", "scripts*"]
 
 [tool.ruff]
 line-length = 100

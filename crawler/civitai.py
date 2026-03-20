@@ -87,29 +87,30 @@ class CivitaiCrawler:
         limit: int = 100,
         cursor: Optional[str] = None,
         tag: Optional[str] = None,
-        period: str = "day",
-        sort: str = "newest",
+        period: str = "Day",
+        sort: str = "Newest",
     ) -> dict:
         """获取图片列表
 
         Args:
             limit: 获取数量
             cursor: 分页游标
-            tag: 标签过滤
-            period: 时间范围 (day, week, month, year, all)
-            sort: 排序方式 (newest, most_reacted, most_collected)
+            tag: 标签过滤 (注意：Civitai API 不支持此参数，保留用于兼容性但不会生效)
+            period: 时间范围 (AllTime, Year, Month, Week, Day)
+            sort: 排序方式 (Newest, Most Reactions, Most Comments)
         """
         params = {
             "limit": min(limit, 200),
-            "nsfw": "false",
             "period": period,
             "sort": sort,
         }
 
         if cursor:
             params["cursor"] = cursor
+        # Note: The Civitai /api/v1/images endpoint does not support tag filtering
+        # The tag parameter is only available for the /api/v1/models endpoint
         if tag:
-            params["tag"] = tag
+            print(f"Warning: Tag filtering is not supported by Civitai images API, ignoring tag='{tag}'")
 
         url = f"{self.API_BASE}/images?{urlencode(params)}"
 

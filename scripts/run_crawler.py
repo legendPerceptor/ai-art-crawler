@@ -24,8 +24,8 @@ async def run_crawler(
     download: bool = False,
     save_db: bool = False,
     database_url: str = None,
-    period: str = "day",
-    sort: str = "newest",
+    period: str = "Day",
+    sort: str = "Newest",
 ):
     """运行爬虫"""
     crawler_cls = CRAWLERS.get(site)
@@ -90,8 +90,8 @@ def main():
     parser.add_argument("--download", "-d", action="store_true", help="下载图片")
     parser.add_argument("--save-db", action="store_true", help="保存到数据库")
     parser.add_argument("--database-url", default=os.environ.get("DATABASE_URL"), help="数据库连接 URL")
-    parser.add_argument("--period", default="day", choices=["day", "week", "month", "year", "all"], help="时间范围")
-    parser.add_argument("--sort", default="newest", choices=["newest", "most_reacted", "most_collected"], help="排序方式")
+    parser.add_argument("--period", default="Day", choices=["AllTime", "Year", "Month", "Week", "Day"], help="时间范围")
+    parser.add_argument("--sort", default="Newest", choices=["Newest", "Most Reactions", "Most Comments"], help="排序方式")
 
     args = parser.parse_args()
 
