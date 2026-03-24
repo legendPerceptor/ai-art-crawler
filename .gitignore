@@ -54,3 +54,4 @@ Thumbs.db
 .env.local
 
 uv.lock
+draft/

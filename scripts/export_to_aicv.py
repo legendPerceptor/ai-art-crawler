@@ -26,7 +26,7 @@ class AICreatorVaultImporter:
         self.api_url = f"{self.base_url}{api_prefix}"
         self.use_knowledge_graph = use_knowledge_graph
         # 不设置默认代理，由调用者决定
-        self.client = httpx.AsyncClient(timeout=60.0, proxy=proxy, follow_redirects=True)
+        self.client = httpx.AsyncClient(timeout=300.0, proxy=proxy, follow_redirects=True)
         # 使用本地缓存避免重复查询（比全量加载高效得多）
         self._local_cache = {}  # 格式: {(assetType, content): asset_id}
 
@@ -52,8 +52,9 @@ class AICreatorVaultImporter:
         """
         # 先检查本地缓存
         cache_key = (asset_type, content)
-        if cache_key in self._local_cache:
-            return {'id': self._local_cache[cache_key]}
+        # 缓存已禁用用于调试
+        # if cache_key in self._local_cache:
+        #     return {'id': self._local_cache[cache_key]}
 
         # 使用后端的精确查询 API
         try:
@@ -81,9 +82,10 @@ class AICreatorVaultImporter:
             提示词数据如果存在，否则 None
         """
         # 先检查本地缓存
-        cache_key = ('prompt', content)
-        if cache_key in self._local_cache:
-            return {'id': self._local_cache[cache_key]} if self._local_cache[cache_key] else None
+        cache_key = ('old_prompt', content)  # 区分 Asset 缓存
+        # 缓存已禁用用于调试
+        # if cache_key in self._local_cache:
+        #     return {'id': self._local_cache[cache_key]} if self._local_cache[cache_key] else None
 
         # 使用数据库级别的查询 API
         try:
@@ -138,7 +140,7 @@ class AICreatorVaultImporter:
             result = response.json()
 
             # 缓存新创建的资产
-            self._local_cache[('prompt', content)] = result.get('id')
+            self._local_cache[('old_prompt', content)] = result.get('id')
             return result
         except Exception as e:
             # 处理唯一约束冲突（后端可能在我们检查后、创建前被其他请求创建了）
@@ -150,13 +152,13 @@ class AICreatorVaultImporter:
                     return {'id': existing['id'], 'assetType': 'prompt', **existing}
             raise
 
-    async def create_prompt(
+    async def create_prompt_to_prompts(
         self,
         content: str,
         score: int = 0,
         check_duplicate: bool = True,
     ) -> dict:
-        """创建提示词（旧 API 模式，兼容性保留）
+        """创建提示词（写入 Prompts 表）
 
         Args:
             content: 提示词内容
@@ -182,7 +184,7 @@ class AICreatorVaultImporter:
         result = response.json()
 
         # 缓存新创建的提示词
-        self._local_cache[('prompt', content)] = result.get('id')
+        self._local_cache[('old_prompt', content)] = result.get('id')
         return result
 
     async def download_image(self, url: str) -> bytes:
@@ -195,52 +197,62 @@ class AICreatorVaultImporter:
             print(f"  ⚠️ 图片下载失败: {str(e)[:100]}")
             raise
 
-    async def upload_image(
+    async def upload_image_to_assets(
         self,
         image_data: bytes,
         filename: str,
         prompt_id: Optional[int] = None,
-        analyze: bool = False,
     ) -> dict:
-        """上传图片到 aicreatorvault
+        """上传图片到 Assets 表（知识图谱）
 
         Args:
             image_data: 图片二进制数据
             filename: 文件名
-            prompt_id: 关联的提示词 ID（资产 ID 或提示词 ID）
-            analyze: 是否自动分析图片
+            prompt_id: 关联的 Prompt Asset ID
         """
         files = {"image": (filename, image_data, "image/jpeg")}
-        data = {}
+        data = {
+            "asset_type": "image",
+            "score": 0,
+        }
+        if prompt_id:
+            data["prompt_id"] = str(prompt_id)
 
-        if self.use_knowledge_graph:
-            # 知识图谱模式：使用 /api/assets/upload
-            if prompt_id:
-                data["prompt_id"] = str(prompt_id)
-            data["score"] = 0  # 可以根据需要调整
+        response = await self.client.post(
+            f"{self.api_url}/assets/upload",
+            files=files,
+            data=data,
+        )
+        response.raise_for_status()
+        return response.json()
 
-            response = await self.client.post(
-                f"{self.api_url}/assets/upload",
-                files=files,
-                data=data,
-            )
-            response.raise_for_status()
-            return response.json()
-        else:
-            # 旧模式：使用 /api/images
-            if prompt_id:
-                data["prompt_id"] = str(prompt_id)
+    async def upload_image_to_images(
+        self,
+        image_data: bytes,
+        filename: str,
+        prompt_id: Optional[int] = None,
+    ) -> dict:
+        """上传图片到 Images 表（旧表）
 
-            # 关闭自动分析（导入时批量分析更高效）
-            data["autoAnalyze"] = analyze
+        Args:
+            image_data: 图片二进制数据
+            filename: 文件名
+            prompt_id: 关联的 Prompt ID
+        """
+        files = {"image": (filename, image_data, "image/jpeg")}
+        data = {
+            "autoAnalyze": "false",  # 导入时不自动分析
+        }
+        if prompt_id:
+            data["prompt_id"] = str(prompt_id)
 
-            response = await self.client.post(
-                f"{self.api_url}/images",
-                files=files,
-                data=data,
-            )
-            response.raise_for_status()
-            return response.json()
+        response = await self.client.post(
+            f"{self.api_url}/images",
+            files=files,
+            data=data,
+        )
+        response.raise_for_status()
+        return response.json()
 
     async def create_relationship(
         self,
@@ -301,17 +313,35 @@ class AICreatorVaultImporter:
             likes = artwork.get("likes", 0)
             score = min(likes // 10, 10 if self.use_knowledge_graph else 5)  # KG: 0-10, 旧API: 0-5
 
+            # ===== 知识图谱模式：同时创建 Asset 和 Prompt 记录 =====
             if self.use_knowledge_graph:
-                # 知识图谱模式：创建 Prompt 资产
+                # 创建 Prompt 资产（Assets 表）
                 prompt_data = await self.create_prompt_asset(
                     content=prompt_content,
                     score=score,
                 )
                 result["prompt_created"] = True
                 result["prompt_id"] = prompt_data.get("id")
+                
+                # 同时创建 Prompt 表记录
+                # 先检查是否已存在
+                existing_old_prompt = await self._check_prompt_exists(prompt_content)
+                if existing_old_prompt:
+                    result["old_prompt_id"] = existing_old_prompt.get("id")
+                    print(f"  ℹ️ Prompt 已存在 (ID: {result['old_prompt_id']})，跳过")
+                else:
+                    try:
+                        old_prompt_data = await self.create_prompt_to_prompts(
+                            content=prompt_content,
+                            score=score,
+                        )
+                        result["old_prompt_id"] = old_prompt_data.get("id")
+                        print(f"  ✓✓✓ 同时创建 Prompt表记录: {result['old_prompt_id']}")
+                    except Exception as e:
+                        print(f"  ⚠️ 创建旧表 Prompt 失败: {e}")
             else:
-                # 旧模式：创建提示词
-                prompt_data = await self.create_prompt(
+                # 旧模式：仅创建提示词，不创建Asset
+                prompt_data = await self.create_prompt_to_prompts(
                     content=prompt_content,
                     score=score,
                 )
@@ -351,17 +381,35 @@ class AICreatorVaultImporter:
 
                 # 上传图片
                 if image_data and filename:
+                    print(f"  📤 开始上传图片: {filename} ({len(image_data)} bytes)")
+                    
+                    # 始终写入 Images 表
                     try:
-                        image_data_result = await self.upload_image(
+                        image_data_result = await self.upload_image_to_images(
                             image_data=image_data,
                             filename=filename,
-                            prompt_id=result["prompt_id"],
-                            analyze=False,
+                            prompt_id=result.get("old_prompt_id"),
                         )
                         result["image_uploaded"] = True
                         result["image_id"] = image_data_result.get("id")
+                        result["old_image_id"] = image_data_result.get("id")
+                        print(f"  ✅ 图片已写入 Images 表: {result['image_id']}")
+                    except Exception as e:
+                        print(f"  ⚠️ Images 表写入失败: {e}")
+                    
+                    # 仅在知识图谱模式时写入 Assets 表
+                    if self.use_knowledge_graph:
+                        try:
+                            asset_image_result = await self.upload_image_to_assets(
+                                image_data=image_data,
+                                filename=filename,
+                                prompt_id=result["prompt_id"],
+                            )
+                            print(f"  ✅ 图片已写入 Assets 表: {asset_image_result.get('id')}")
+                        except Exception as e:
+                            print(f"  ⚠️ Assets 表写入失败: {e}")
 
-                        # 知识图谱模式：如果没有通过 promptId 自动创建关系，手动创建
+                        # 知识图谱模式：创建关系
                         if self.use_knowledge_graph and result["prompt_id"] and result["image_id"]:
                             try:
                                 await self.create_relationship(
@@ -377,8 +425,6 @@ class AICreatorVaultImporter:
                                 result["relationship_created"] = True
                             except Exception as e:
                                 print(f"  ⚠️ 创建关系失败: {e}")
-                    except Exception as e:
-                        result["error"] = f"Image upload failed: {str(e)}"
 
         except Exception as e:
             result["error"] = str(e)
