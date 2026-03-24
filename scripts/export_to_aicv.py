@@ -216,7 +216,7 @@ class AICreatorVaultImporter:
         if self.use_knowledge_graph:
             # 知识图谱模式：使用 /api/assets/upload
             if prompt_id:
-                data["promptId"] = str(prompt_id)
+                data["prompt_id"] = str(prompt_id)
             data["score"] = 0  # 可以根据需要调整
 
             response = await self.client.post(
@@ -229,7 +229,7 @@ class AICreatorVaultImporter:
         else:
             # 旧模式：使用 /api/images
             if prompt_id:
-                data["promptId"] = str(prompt_id)
+                data["prompt_id"] = str(prompt_id)
 
             # 关闭自动分析（导入时批量分析更高效）
             data["autoAnalyze"] = analyze
@@ -260,9 +260,9 @@ class AICreatorVaultImporter:
         response = await self.client.post(
             f"{self.api_url}/relationships",
             json={
-                "sourceId": source_id,
-                "targetId": target_id,
-                "relationshipType": relationship_type,
+                "source_id": source_id,
+                "target_id": target_id,
+                "relationship_type": relationship_type,
                 "properties": properties or {},
             }
         )
