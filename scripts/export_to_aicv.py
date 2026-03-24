@@ -75,7 +75,7 @@ class AICreatorVaultImporter:
         return None
 
     async def _check_prompt_exists(self, content: str) -> Optional[dict]:
-        """检查提示词是否存在（旧 API，兼容性保留）
+        """检查提示词是否存在（使用数据库查询）
 
         Returns:
             提示词数据如果存在，否则 None
@@ -85,17 +85,19 @@ class AICreatorVaultImporter:
         if cache_key in self._local_cache:
             return {'id': self._local_cache[cache_key]} if self._local_cache[cache_key] else None
 
-        # 旧 API 需要遍历（这是保留的兼容逻辑）
-        # 实际使用时建议启用知识图谱模式
+        # 使用数据库级别的查询 API
         try:
-            response = await self.client.get(f"{self.api_url}/prompts")
+            response = await self.client.get(
+                f"{self.api_url}/prompts/find",
+                params={'content': content}
+            )
             if response.status_code == 200:
-                prompts = response.json()
-                for p in prompts:
-                    if p.get('content') == content:
-                        self._local_cache[cache_key] = p.get('id')
-                        return p
-                # 不存在
+                prompt = response.json()
+                # 缓存结果
+                self._local_cache[cache_key] = prompt.get('id')
+                return prompt
+            elif response.status_code == 404:
+                # 不存在，缓存这个信息避免重复查询
                 self._local_cache[cache_key] = None
                 return None
         except Exception as e:
