@@ -1,84 +1,86 @@
 # AI Art Crawler
 
-从 AI 艺术社区网站爬取提示词和图片，支持导入到 aicreatorvault 平台。
+[中文文档](README_zh.md)
 
-## 🎯 支持的网站
+Crawl prompts and images from AI art community websites, with support for importing into the aicreatorvault platform.
 
-| 网站 | 状态 | 特点 |
-|------|------|------|
-| **Civitai** | ✅ 已实现 | API 支持，无需浏览器 |
-| **Lexica** | 🚧 待开发 | Stable Diffusion 图片库 |
-| **PromptHero** | 🚧 待开发 | 提示词搜索引擎 |
+## 🎯 Supported Sites
 
-## 🚀 快速开始
+| Site | Status | Features |
+|------|--------|----------|
+| **Civitai** | ✅ Implemented | API support, no browser required |
+| **Lexica** | 🚧 Planned | Stable Diffusion image gallery |
+| **PromptHero** | 🚧 Planned | Prompt search engine |
 
-### 方式一：本地运行（推荐开发）
+## 🚀 Quick Start
 
-**安装依赖**：
+### Option 1: Local Run (Recommended for Development)
+
+**Install dependencies**:
 
 ```bash
-# 使用 uv 安装依赖（推荐）
+# Install with uv (recommended)
 uv sync
 # Editable Install
 uv pip install -e .
 ```
 
-**运行爬虫**：
+**Run the crawler**:
 
 ```bash
-# 基本用法
+# Basic usage
 uv run python scripts/run_crawler.py --site civitai --limit 50 --download
 
-# 使用代理
+# With proxy
 HTTPS_PROXY=http://localhost:1087 python scripts/run_crawler.py --limit 100 --download
 
-# 获取本周最热图片
+# Get this week's most popular images
 uv run python scripts/run_crawler.py --limit 50 --period Week --sort "Most Reactions" --download
 
-# 保存到数据库
+# Save to database
 DATABASE_URL="postgresql://user:pass@localhost:5432/db" \
   python scripts/run_crawler.py --limit 50 --save-db
 ```
 
-**导出到 aicreatorvault**：
+**Export to aicreatorvault**:
 
 ```bash
-# 导入数据（需要认证 - 使用邮箱登录，用户不存在时自动注册）
+# Import data (authentication required - login with email, auto-register if user doesn't exist)
 uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json \
   --url http://localhost:3001 \
   --email your@email.com --password yourpassword
 
-# 或直接指定用户ID
+# Or specify user ID directly
 uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json \
   --url http://localhost:3001 --user-id 1
 
-# 使用旧 API（禁用知识图谱）
+# Use legacy API (disable knowledge graph)
 uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json --url http://localhost:3001 --no-kg
 
-# 限制导入数量（测试用）
+# Limit import count (for testing)
 uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json --limit 10
 ```
 
 ---
 
-### 方式二：使用 Docker Compose（推荐部署）
+### Option 2: Docker Compose (Recommended for Deployment)
 
-**构建镜像**：
+**Build the image**:
 
 ```bash
 docker build -t ai-art-crawler -f docker/Dockerfile .
 ```
 
-**爬取数据**：
+**Crawl data**:
 
 ```bash
-# 使用docker compose
+# Using docker compose
 docker compose --profile crawl run --rm crawler
 ```
 
 
 ```bash
-# 爬取 50 张人像图片（需要配置代理）
+# Crawl 50 portrait images (proxy configuration required)
 docker run --rm \
   --network aicreatorvault-net \
   -e HTTP_PROXY=http://aigc-xray:1087 \
@@ -88,7 +90,7 @@ docker run --rm \
   python scripts/run_crawler.py --site civitai --limit 50 --tag portrait --download
 ```
 
-**导入到 aicreatorvault**（需要认证）：
+**Import to aicreatorvault** (authentication required):
 
 ```bash
 docker run --rm \
@@ -100,39 +102,39 @@ docker run --rm \
   --email your@email.com --password yourpassword
 ```
 
-### 命令行参数说明
+### CLI Arguments
 
-**爬虫参数**：
-- `--site civitai` - 爬取 Civitai 网站
-- `--limit 50` - 爬取数量
-- `--download` - 下载图片到本地
-- `--save-db` - 保存到数据库（需要配置 DATABASE_URL）
-- `--period Day` - 时间范围：AllTime, Year, Month, Week, Day
-- `--sort Newest` - 排序方式：Newest, Most Reactions, Most Comments
+**Crawler arguments**:
+- `--site civitai` - Crawl from Civitai
+- `--limit 50` - Number of items to crawl
+- `--download` - Download images to local storage
+- `--save-db` - Save to database (requires DATABASE_URL)
+- `--period Day` - Time period: AllTime, Year, Month, Week, Day
+- `--sort Newest` - Sort order: Newest, Most Reactions, Most Comments
 
-**获取不同数据**：
+**Fetching different data**:
 ```bash
-# 今日最新
+# Today's newest
 python scripts/run_crawler.py --limit 50 --period Day --sort Newest
 
-# 本周最热
+# This week's most popular
 python scripts/run_crawler.py --limit 50 --period Week --sort "Most Reactions"
 
-# 历史最热
+# All-time most popular
 python scripts/run_crawler.py --limit 50 --period AllTime --sort "Most Reactions"
 ```
 
-**导出参数**：
-- `--url` - aicreatorvault 后端地址
-- `--limit 10` - 限制导入数量（可选）
-- `--no-kg` - 禁用知识图谱模式（使用旧 API）
-- `--no-download` - 不上传图片（仅导入提示词）
-- `--proxy` - 代理服务器（可选）
-- `--no-proxy` - 不使用代理（可选）
+**Export arguments**:
+- `--url` - aicreatorvault backend URL
+- `--limit 10` - Limit import count (optional)
+- `--no-kg` - Disable knowledge graph mode (use legacy API)
+- `--no-download` - Don't upload images (import prompts only)
+- `--proxy` - Proxy server (optional)
+- `--no-proxy` - Don't use proxy (optional)
 
-## 📁 数据格式
+## 📁 Data Format
 
-爬取的数据保存为 JSON 格式：
+Crawled data is saved in JSON format:
 
 ```json
 {
@@ -150,67 +152,67 @@ python scripts/run_crawler.py --limit 50 --period AllTime --sort "Most Reactions
 }
 ```
 
-## 🛠️ 完整示例
+## 🛠️ Complete Examples
 
-### 场景 1：爬取并导入 100 张人像图片（Docker Compose）
+### Scenario 1: Crawl and import 100 portrait images (Docker Compose)
 
 ```bash
-# Step 1: 爬取数据
+# Step 1: Crawl data
 docker compose --profile crawl run --rm crawler \
   python scripts/run_crawler.py --site civitai --limit 100 --tag portrait --download
 
-# Step 2: 导入到 aicreatorvault
+# Step 2: Import to aicreatorvault
 docker compose --profile export run --rm exporter
 ```
 
-### 场景 2：测试模式 - 爬取 10 条数据
+### Scenario 2: Test mode - Crawl 10 items
 
 ```bash
-# 仅爬取提示词，不下载图片
+# Crawl prompts only, without downloading images
 docker compose --profile crawl run --rm crawler \
   python scripts/run_crawler.py --site civitai --limit 10 --tag portrait
 
-# 导入前 5 条测试
+# Import first 5 items for testing
 docker compose --profile export run --rm exporter \
   python scripts/export_to_aicv.py /data/crawled/civitai_*.json --url $$AICV_URL --limit 5
 ```
 
-## 📊 项目结构
+## 📊 Project Structure
 
 ```
 ai-art-crawler/
 ├── crawler/
-│   ├── base.py           # 基础爬虫类
-│   └── civitai.py        # Civitai API 爬虫
+│   ├── base.py           # Base crawler class
+│   └── civitai.py        # Civitai API crawler
 ├── scripts/
-│   ├── run_crawler.py    # 运行爬虫
-│   └── export_to_aicv.py # 导出到 aicreatorvault
+│   ├── run_crawler.py    # Run crawler
+│   └── export_to_aicv.py # Export to aicreatorvault
 ├── storage/
-│   └── database.py       # 数据库操作
+│   └── database.py       # Database operations
 ├── config/
-│   └── settings.py       # 配置
+│   └── settings.py       # Configuration
 ├── docker/
-│   └── Dockerfile        # Docker 镜像
-├── data/                 # 数据目录
-│   ├── crawled/          # 爬取的 JSON
-│   └── images/           # 下载的图片
-├── docker-compose.yml    # Docker Compose 配置
+│   └── Dockerfile        # Docker image
+├── data/                 # Data directory
+│   ├── crawled/          # Crawled JSON files
+│   └── images/           # Downloaded images
+├── docker-compose.yml    # Docker Compose configuration
 ├── requirements.txt
 └── README.md
 ```
 
-## 🔧 高级配置
+## 🔧 Advanced Configuration
 
-### 使用代理
+### Using a Proxy
 
-爬虫需要通过代理访问外网，Docker Compose 方式已自动配置 `aigc-xray` 代理：
+The crawler requires a proxy to access external websites. Docker Compose mode is pre-configured with the `aigc-xray` proxy:
 
 ```bash
-# Docker Compose 方式（自动配置）
+# Docker Compose mode (auto-configured)
 HTTP_PROXY=http://aigc-xray:1087
 HTTPS_PROXY=http://aigc-xray:1087
 
-# docker run 方式需要手动指定
+# docker run mode requires manual specification
 docker run --rm \
   --network aicreatorvault-net \
   -e HTTP_PROXY=http://aigc-xray:1087 \
@@ -218,14 +220,14 @@ docker run --rm \
   ...
 ```
 
-### 保存到数据库
+### Saving to Database
 
 ```bash
-# Docker Compose 方式（已配置 DATABASE_URL）
+# Docker Compose mode (DATABASE_URL pre-configured)
 docker compose --profile crawl run --rm crawler \
   python scripts/run_crawler.py --site civitai --limit 50 --save-db
 
-# docker run 方式需要手动指定
+# docker run mode requires manual specification
 docker run --rm \
   --network aicreatorvault-net \
   -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
@@ -233,58 +235,58 @@ docker run --rm \
   python scripts/run_crawler.py --site civitai --limit 50 --save-db
 ```
 
-## ⚠️ 注意事项
+## ⚠️ Notices
 
-1. **遵守 robots.txt** - 尊重网站的爬虫协议
-2. **速率限制** - 默认 2 请求/秒，避免对目标网站造成压力
-3. **数据使用** - 仅用于个人测试，不用于商业用途
-4. **版权** - 注意图片的版权和授权
+1. **Respect robots.txt** - Follow the website's crawler protocol
+2. **Rate limiting** - Default 2 requests/second to avoid overwhelming the target site
+3. **Data usage** - For personal testing only, not for commercial use
+4. **Copyright** - Be mindful of image copyright and licensing
 
-## 🔄 与 aicreatorvault 集成
+## 🔄 aicreatorvault Integration
 
-### 知识图谱模式（默认）
+### Knowledge Graph Mode (Default)
 
-导入流程：
+Import flow:
 
-1. **创建提示词资产** - 通过 `/api/assets` 创建 Prompt 资产
-2. **上传图片资产** - 通过 `/api/assets/upload` 创建 Image 资产
-3. **创建图谱关系** - 通过 `/api/relationships` 创建 Prompt → Image 的 `generated` 关系
+1. **Create prompt asset** - Create a Prompt asset via `/api/assets`
+2. **Upload image asset** - Create an Image asset via `/api/assets/upload`
+3. **Create graph relationship** - Create a Prompt → Image `generated` relationship via `/api/relationships`
 
-导入后可在 aicreatorvault 前端的"知识图谱"页面查看：
-- 资产节点（提示词、图片）
-- 关系边（生成关系）
-- 图谱可视化
+After importing, you can view in the aicreatorvault frontend's "Knowledge Graph" page:
+- Asset nodes (prompts, images)
+- Relationship edges (generated relationships)
+- Graph visualization
 
-### 旧 API 模式
+### Legacy API Mode
 
-使用 `--no-kg` 参数启用旧 API：
+Use the `--no-kg` flag to enable the legacy API:
 
-1. **创建提示词** - 通过 `/api/prompts` 创建提示词
-2. **上传图片** - 通过 `/api/images` 上传图片并关联 promptId
-3. **关联数据** - 图片自动关联到提示词
+1. **Create prompt** - Create a prompt via `/api/prompts`
+2. **Upload image** - Upload an image via `/api/images` and associate with promptId
+3. **Associate data** - Images are automatically associated with the prompt
 
-### API 对比
+### API Comparison
 
-| 功能 | 知识图谱模式 (默认) | 旧 API 模式 (--no-kg) |
-|------|-------------------|---------------------|
-| 提示词创建 | `/api/assets` (type: prompt) | `/api/prompts` |
-| 图片上传 | `/api/assets/upload` | `/api/images` |
-| 关系管理 | `/api/relationships` | 通过 promptId 自动关联 |
-| 图谱支持 | ✅ 完整知识图谱 | ❌ 仅基础关联 |
-| 评分范围 | 0-10 | 0-5 |
-| 前端展示 | "知识图谱"标签页 | "提示词"和"图片"标签页 |
+| Feature | Knowledge Graph Mode (Default) | Legacy API Mode (--no-kg) |
+|---------|-------------------------------|--------------------------|
+| Prompt creation | `/api/assets` (type: prompt) | `/api/prompts` |
+| Image upload | `/api/assets/upload` | `/api/images` |
+| Relationship management | `/api/relationships` | Auto-associated via promptId |
+| Graph support | ✅ Full knowledge graph | ❌ Basic association only |
+| Rating range | 0-10 | 0-5 |
+| Frontend display | "Knowledge Graph" tab | "Prompts" and "Images" tabs |
 
-## 📝 开发计划
+## 📝 Roadmap
 
-- [x] Civitai API 爬虫
-- [x] 图片下载
-- [x] aicreatorvault 导入
-- [x] 去重机制（支持多文件导入和跨文件去重）
-- [x] 知识图谱支持（Prompt -> Image 关系）
-- [ ] Lexica 爬虫
-- [ ] PromptHero 爬虫
-- [ ] Midjourney 爬虫
-- [ ] 定时任务
+- [x] Civitai API crawler
+- [x] Image download
+- [x] aicreatorvault import
+- [x] Deduplication (multi-file import and cross-file deduplication)
+- [x] Knowledge graph support (Prompt -> Image relationships)
+- [ ] Lexica crawler
+- [ ] PromptHero crawler
+- [ ] Midjourney crawler
+- [ ] Scheduled tasks
 
 ## 📄 License
 
