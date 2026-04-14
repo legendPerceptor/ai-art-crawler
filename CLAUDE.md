@@ -126,6 +126,24 @@ class Artwork(BaseModel):
 - Associates images with prompts automatically
 - Uses `aigc-xray` container proxy (`http://aigc-xray:1087`) by default for external downloads
 - Set `autoAnalyze=false` for batch uploads (analyze separately)
+- **Requires authentication** - must use `--email/--password` to login (auto-register) or `--user-id` directly
+
+**Authentication (Required since aicreatorvault v2 multi-user update):**
+```bash
+# Login with email/password (auto-registers if user doesn't exist)
+docker run --rm \
+  --network aicreatorvault_aicreatorvault-net \
+  -v $(pwd)/data:/data \
+  ai-art-crawler \
+  python scripts/export_to_aicv.py /data/crawled/civitai_*.json \
+  --url http://aicreatorvault-backend-1:3001 \
+  --email your@email.com --password yourpassword
+
+# Or specify user ID directly (for existing users)
+python scripts/export_to_aicv.py /data/crawled/civitai_*.json \
+  --url http://localhost:3001 \
+  --user-id 1
+```
 
 ## Key Patterns
 

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
 将爬取的数据导入到 aicreatorvault（支持知识图谱）
+
+支持两种认证方式：
+1. 邮箱登录 (--email/--password) - 会自动注册不存在的用户
+2. 用户ID直接指定 (--user-id) - 适用于已存在的用户
 """
 import argparse
 import asyncio
@@ -21,14 +25,96 @@ class AICreatorVaultImporter:
         api_prefix: str = "/api",
         proxy: Optional[str] = None,
         use_knowledge_graph: bool = True,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        user_id: Optional[int] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}{api_prefix}"
         self.use_knowledge_graph = use_knowledge_graph
+        self.email = email
+        self.password = password
+        self.user_id = user_id
+        self.access_token: Optional[str] = None
         # 不设置默认代理，由调用者决定
         self.client = httpx.AsyncClient(timeout=300.0, proxy=proxy, follow_redirects=True)
         # 使用本地缓存避免重复查询（比全量加载高效得多）
         self._local_cache = {}  # 格式: {(assetType, content): asset_id}
+
+    def _get_auth_headers(self) -> dict:
+        """获取认证请求头"""
+        if self.access_token:
+            return {"Authorization": f"Bearer {self.access_token}"}
+        return {}
+
+    async def login(self) -> bool:
+        """登录获取访问令牌"""
+        if not self.email or not self.password:
+            return False
+
+        try:
+            response = await self.client.post(
+                f"{self.api_url}/auth/login",
+                json={"email": self.email, "password": self.password},
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data.get("accessToken")
+                if self.access_token:
+                    print(f"✅ 登录成功: {self.email}")
+                    return True
+            elif response.status_code == 401:
+                # 用户不存在，尝试注册
+                print(f"⚠️ 用户不存在，尝试注册...")
+                return await self.register()
+        except Exception as e:
+            print(f"❌ 登录失败: {e}")
+        return False
+
+    async def register(self) -> bool:
+        """注册新用户"""
+        if not self.email or not self.password:
+            return False
+
+        try:
+            # 从邮箱提取用户名
+            username = self.email.split("@")[0]
+            response = await self.client.post(
+                f"{self.api_url}/auth/register",
+                json={
+                    "username": username,
+                    "email": self.email,
+                    "password": self.password,
+                },
+            )
+            if response.status_code == 201:
+                data = response.json()
+                self.access_token = data.get("accessToken")
+                if self.access_token:
+                    print(f"✅ 注册成功: {self.email}")
+                    return True
+            elif response.status_code == 409:
+                print(f"⚠️ 用户已存在，尝试登录...")
+                # 可能是密码不对，再试一次登录
+                return await self.login()
+        except Exception as e:
+            print(f"❌ 注册失败: {e}")
+        return False
+
+    async def get_current_user(self) -> Optional[dict]:
+        """获取当前用户信息"""
+        if not self.access_token:
+            return None
+        try:
+            response = await self.client.get(
+                f"{self.api_url}/auth/me",
+                headers=self._get_auth_headers(),
+            )
+            if response.status_code == 200:
+                return response.json()
+        except:
+            pass
+        return None
 
     async def close(self):
         await self.client.aclose()
@@ -37,9 +123,16 @@ class AICreatorVaultImporter:
         """检查 API 是否可用"""
         try:
             if self.use_knowledge_graph:
-                response = await self.client.get(f"{self.api_url}/assets", params={'limit': 1})
+                response = await self.client.get(
+                    f"{self.api_url}/assets",
+                    params={"limit": 1},
+                    headers=self._get_auth_headers(),
+                )
             else:
-                response = await self.client.get(f"{self.api_url}/prompts")
+                response = await self.client.get(
+                    f"{self.api_url}/prompts",
+                    headers=self._get_auth_headers(),
+                )
             return response.status_code == 200
         except:
             return False
@@ -52,20 +145,18 @@ class AICreatorVaultImporter:
         """
         # 先检查本地缓存
         cache_key = (asset_type, content)
-        # 缓存已禁用用于调试
-        # if cache_key in self._local_cache:
-        #     return {'id': self._local_cache[cache_key]}
 
-        # 使用后端的精确查询 API
+        # 使用后端的精确查询 API（需要认证）
         try:
             response = await self.client.get(
                 f"{self.api_url}/assets/find",
-                params={'assetType': asset_type, 'content': content}
+                params={"asset_type": asset_type, "content": content},
+                headers=self._get_auth_headers(),
             )
             if response.status_code == 200:
                 asset = response.json()
                 # 缓存结果
-                self._local_cache[cache_key] = asset.get('id')
+                self._local_cache[cache_key] = asset.get("id")
                 return asset
             elif response.status_code == 404:
                 # 不存在，缓存这个信息避免重复查询
@@ -82,21 +173,19 @@ class AICreatorVaultImporter:
             提示词数据如果存在，否则 None
         """
         # 先检查本地缓存
-        cache_key = ('old_prompt', content)  # 区分 Asset 缓存
-        # 缓存已禁用用于调试
-        # if cache_key in self._local_cache:
-        #     return {'id': self._local_cache[cache_key]} if self._local_cache[cache_key] else None
+        cache_key = ("old_prompt", content)
 
-        # 使用数据库级别的查询 API
+        # 使用数据库级别的查询 API（需要认证）
         try:
             response = await self.client.get(
                 f"{self.api_url}/prompts/find",
-                params={'content': content}
+                params={"content": content},
+                headers=self._get_auth_headers(),
             )
             if response.status_code == 200:
                 prompt = response.json()
                 # 缓存结果
-                self._local_cache[cache_key] = prompt.get('id')
+                self._local_cache[cache_key] = prompt.get("id")
                 return prompt
             elif response.status_code == 404:
                 # 不存在，缓存这个信息避免重复查询
@@ -121,35 +210,36 @@ class AICreatorVaultImporter:
         """
         # 高效检查是否已存在
         if check_duplicate:
-            existing = await self._check_asset_exists('prompt', content)
+            existing = await self._check_asset_exists("prompt", content)
             if existing:
                 print(f"  ℹ️  提示词资产已存在 (ID: {existing['id']})，跳过创建")
-                return {'id': existing['id'], 'assetType': 'prompt', **existing}
+                return {"id": existing["id"], "asset_type": "prompt", **existing}
 
         # 创建新资产
         try:
             response = await self.client.post(
                 f"{self.api_url}/assets",
                 json={
-                    "assetType": "prompt",
+                    "asset_type": "prompt",
                     "content": content,
                     "score": min(max(score, 0), 10),
-                }
+                },
+                headers=self._get_auth_headers(),
             )
             response.raise_for_status()
             result = response.json()
 
             # 缓存新创建的资产
-            self._local_cache[('old_prompt', content)] = result.get('id')
+            self._local_cache[("prompt", content)] = result.get("id")
             return result
         except Exception as e:
             # 处理唯一约束冲突（后端可能在我们检查后、创建前被其他请求创建了）
-            if '409' in str(e) or 'already exists' in str(e).lower():
+            if "409" in str(e) or "already exists" in str(e).lower():
                 # 再查一次
-                existing = await self._check_asset_exists('prompt', content)
+                existing = await self._check_asset_exists("prompt", content)
                 if existing:
                     print(f"  ℹ️  提示词资产已存在 (并发创建, ID: {existing['id']})")
-                    return {'id': existing['id'], 'assetType': 'prompt', **existing}
+                    return {"id": existing["id"], "asset_type": "prompt", **existing}
             raise
 
     async def create_prompt_to_prompts(
@@ -178,13 +268,14 @@ class AICreatorVaultImporter:
             json={
                 "content": content,
                 "score": min(max(score, 0), 5),
-            }
+            },
+            headers=self._get_auth_headers(),
         )
         response.raise_for_status()
         result = response.json()
 
         # 缓存新创建的提示词
-        self._local_cache[('old_prompt', content)] = result.get('id')
+        self._local_cache[("old_prompt", content)] = result.get("id")
         return result
 
     async def download_image(self, url: str) -> bytes:
@@ -210,18 +301,20 @@ class AICreatorVaultImporter:
             filename: 文件名
             prompt_id: 关联的 Prompt Asset ID
         """
-        files = {"image": (filename, image_data, "image/jpeg")}
         data = {
             "asset_type": "image",
             "score": 0,
         }
         if prompt_id:
             data["prompt_id"] = str(prompt_id)
+        if self.user_id:
+            data["user_id"] = self.user_id
 
         response = await self.client.post(
             f"{self.api_url}/assets/upload",
-            files=files,
+            files={"image": (filename, image_data, "image/jpeg")},
             data=data,
+            headers=self._get_auth_headers(),
         )
         response.raise_for_status()
         return response.json()
@@ -239,17 +332,20 @@ class AICreatorVaultImporter:
             filename: 文件名
             prompt_id: 关联的 Prompt ID
         """
-        files = {"image": (filename, image_data, "image/jpeg")}
         data = {
             "autoAnalyze": "false",  # 导入时不自动分析
         }
         if prompt_id:
             data["prompt_id"] = str(prompt_id)
+        if self.user_id:
+            data["userId"] = self.user_id
+            data["user_id"] = self.user_id
 
         response = await self.client.post(
             f"{self.api_url}/images",
-            files=files,
+            files={"image": (filename, image_data, "image/jpeg")},
             data=data,
+            headers=self._get_auth_headers(),
         )
         response.raise_for_status()
         return response.json()
@@ -276,7 +372,8 @@ class AICreatorVaultImporter:
                 "target_id": target_id,
                 "relationship_type": relationship_type,
                 "properties": properties or {},
-            }
+            },
+            headers=self._get_auth_headers(),
         )
         response.raise_for_status()
         return response.json()
@@ -322,7 +419,7 @@ class AICreatorVaultImporter:
                 )
                 result["prompt_created"] = True
                 result["prompt_id"] = prompt_data.get("id")
-                
+
                 # 同时创建 Prompt 表记录
                 # 先检查是否已存在
                 existing_old_prompt = await self._check_prompt_exists(prompt_content)
@@ -358,6 +455,7 @@ class AICreatorVaultImporter:
                 if local_path:
                     try:
                         import os
+
                         if os.path.exists(local_path):
                             with open(local_path, "rb") as f:
                                 image_data = f.read()
@@ -382,7 +480,7 @@ class AICreatorVaultImporter:
                 # 上传图片
                 if image_data and filename:
                     print(f"  📤 开始上传图片: {filename} ({len(image_data)} bytes)")
-                    
+
                     # 始终写入 Images 表
                     try:
                         image_data_result = await self.upload_image_to_images(
@@ -396,7 +494,7 @@ class AICreatorVaultImporter:
                         print(f"  ✅ 图片已写入 Images 表: {result['image_id']}")
                     except Exception as e:
                         print(f"  ⚠️ Images 表写入失败: {e}")
-                    
+
                     # 仅在知识图谱模式时写入 Assets 表
                     if self.use_knowledge_graph:
                         try:
@@ -410,7 +508,11 @@ class AICreatorVaultImporter:
                             print(f"  ⚠️ Assets 表写入失败: {e}")
 
                         # 知识图谱模式：创建关系
-                        if self.use_knowledge_graph and result["prompt_id"] and result["image_id"]:
+                        if (
+                            self.use_knowledge_graph
+                            and result["prompt_id"]
+                            and result["image_id"]
+                        ):
                             try:
                                 await self.create_relationship(
                                     source_id=result["prompt_id"],
@@ -420,7 +522,7 @@ class AICreatorVaultImporter:
                                         "source": artwork.get("source"),
                                         "source_id": artwork.get("source_id"),
                                         "imported_at": datetime.now().isoformat(),
-                                    }
+                                    },
                                 )
                                 result["relationship_created"] = True
                             except Exception as e:
@@ -467,7 +569,7 @@ class AICreatorVaultImporter:
             except FileNotFoundError:
                 print(f"  ⚠️  文件不存在: {json_path}")
             except Exception as e:
-                print(f"  ❌ 读取文件失败: {e}")
+                print(f"  ❌  读取文件失败: {e}")
 
         if not all_artworks:
             print("❌ 没有可导入的数据")
@@ -476,7 +578,7 @@ class AICreatorVaultImporter:
         if limit:
             all_artworks = all_artworks[:limit]
 
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"准备导入 {len(all_artworks)} 条数据（已去重）...")
 
         # 检查 API 连接
@@ -492,7 +594,7 @@ class AICreatorVaultImporter:
         results = []
 
         for i, artwork in enumerate(all_artworks):
-            print(f"\n[{i+1}/{len(all_artworks)}] 处理: {artwork.get('source_id', 'unknown')}")
+            print(f"\n[{i + 1}/{len(all_artworks)}] 处理: {artwork.get('source_id', 'unknown')}")
 
             result = await self.import_artwork(
                 artwork=artwork,
@@ -514,19 +616,44 @@ class AICreatorVaultImporter:
                 failed += 1
                 print(f"  ❌ 失败: {result.get('error')}")
 
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"导入完成!")
         print(f"  ✅ 成功: {imported}")
         print(f"  ⏭️  跳过: {skipped}")
         print(f"  ❌ 失败: {failed}")
         if self.use_knowledge_graph:
             print(f"  📊 知识图谱: 已启用")
+        print(f"  👤 用户ID: {self.user_id}")
 
         return results
 
 
+def print_auth_help():
+    """打印认证帮助信息"""
+    print("""
+认证选项（必选其一）：
+  --email <邮箱> --password <密码>  使用邮箱登录（用户不存在时会自动注册）
+  --user-id <ID>                   直接指定用户ID（适用于已存在的用户）
+
+示例：
+  # 登录并导入（用户不存在时自动注册）
+  python export_to_aicv.py data.json --email test@example.com --password 123456
+
+  # 使用已存在用户导入
+  python export_to_aicv.py data.json --user-id 1
+""")
+
+
 async def main():
-    parser = argparse.ArgumentParser(description="导入数据到 aicreatorvault")
+    parser = argparse.ArgumentParser(
+        description="导入数据到 aicreatorvault",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+认证选项（必选其一）：
+  --email <邮箱> --password <密码>  使用邮箱登录（用户不存在时会自动注册）
+  --user-id <ID>                   直接指定用户ID（适用于已存在的用户）
+        """,
+    )
     parser.add_argument("json_files", nargs="+", help="爬取的 JSON 数据文件（支持多个文件或通配符）")
     parser.add_argument("--url", default="http://localhost:3001", help="aicreatorvault API 地址")
     parser.add_argument("--proxy", help="代理服务器")
@@ -534,16 +661,51 @@ async def main():
     parser.add_argument("--no-download", action="store_true", help="不上传图片")
     parser.add_argument("--limit", type=int, help="限制导入数量")
     parser.add_argument("--no-kg", action="store_true", help="禁用知识图谱模式（使用旧 API）")
+    parser.add_argument("--email", help="用户邮箱（用于登录/注册）")
+    parser.add_argument("--password", help="用户密码（用于登录/注册）")
+    parser.add_argument("--user-id", type=int, help="直接指定用户 ID（无需认证）")
 
     args = parser.parse_args()
+
+    # 验证认证参数
+    if not args.email and not args.user_id:
+        print("❌ 错误：必须提供 --email 和 --password，或者 --user-id")
+        print_auth_help()
+        return
+
+    if args.email and not args.password:
+        print("❌ 错误：提供了 --email 但没有提供 --password")
+        print_auth_help()
+        return
 
     importer = AICreatorVaultImporter(
         base_url=args.url,
         proxy=None if args.no_proxy else args.proxy,
         use_knowledge_graph=not args.no_kg,  # 默认启用知识图谱
+        email=args.email,
+        password=args.password,
+        user_id=args.user_id,
     )
 
     try:
+        # 尝试登录（如果有邮箱和密码）
+        if args.email and args.password:
+            login_ok = await importer.login()
+            if not login_ok:
+                print("❌ 登录失败，无法导入数据")
+                return
+
+        # 获取当前用户信息
+        if importer.access_token:
+            user_info = await importer.get_current_user()
+            if user_info:
+                importer.user_id = user_info.get("id")
+                print(f"👤 当前用户: {user_info.get('username')} (ID: {importer.user_id})")
+
+        if not importer.user_id:
+            print("❌ 无法确定用户 ID，请提供 --user-id")
+            return
+
         await importer.import_from_json(
             json_paths=args.json_files,
             download_images=not args.no_download,

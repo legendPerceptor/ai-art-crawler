@@ -43,8 +43,14 @@ DATABASE_URL="postgresql://user:pass@localhost:5432/db" \
 **导出到 aicreatorvault**：
 
 ```bash
-# 导入数据（默认启用知识图谱模式）
-uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json --url http://localhost:3001
+# 导入数据（需要认证 - 使用邮箱登录，用户不存在时自动注册）
+uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json \
+  --url http://localhost:3001 \
+  --email your@email.com --password yourpassword
+
+# 或直接指定用户ID
+uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json \
+  --url http://localhost:3001 --user-id 1
 
 # 使用旧 API（禁用知识图谱）
 uv run python scripts/export_to_aicv.py data/crawled/civitai_*.json --url http://localhost:3001 --no-kg
@@ -82,7 +88,7 @@ docker run --rm \
   python scripts/run_crawler.py --site civitai --limit 50 --tag portrait --download
 ```
 
-**导入到 aicreatorvault**：
+**导入到 aicreatorvault**（需要认证）：
 
 ```bash
 docker run --rm \
@@ -90,7 +96,8 @@ docker run --rm \
   -v $(pwd)/data:/data \
   ai-art-crawler \
   python scripts/export_to_aicv.py /data/crawled/civitai_*.json \
-  --url http://aicreatorvault-backend-1:3001
+  --url http://aicreatorvault-backend-1:3001 \
+  --email your@email.com --password yourpassword
 ```
 
 ### 命令行参数说明
